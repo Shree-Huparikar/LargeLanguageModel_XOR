@@ -27,10 +27,10 @@ def _is_quota_error(exc: Exception) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # app.state.chat_structured_llm = create_structured_llm()
-    # app.state.chat_prompt = create_chat_prompt()
+    app.state.chat_structured_llm = create_structured_llm()
+    app.state.chat_prompt = create_chat_prompt()
     # app.state.rag_engine = None
-    app.state.module3_agent = None
+    # app.state.module3_agent = None
     yield
 
 

@@ -1,89 +1,126 @@
-import requests
+"""Module 2 - PDF question answering with RAG. Upload your own PDF or use the sample."""
 import streamlit as st
 
-BASE_URL = "http://127.0.0.1:8000"
-RAG_API_URL = f"{BASE_URL}/api/rag"
-UPLOAD_API_URL = f"{BASE_URL}/api/rag/upload"
+from common import (REQUEST_FIELDS, MODULES, api_post, api_upload, chips,
+                    empty_state, hero, pick, quote, setup_page, sidebar)
+
+MODULE = "rag"
+setup_page(MODULE)
+sidebar(MODULE)
+
+st.session_state.setdefault("rag_history", [])
+st.session_state.setdefault("rag_doc", None)        # info about the uploaded PDF
+st.session_state.setdefault("rag_sig", None)        # name:size of the last handled upload
+st.session_state.setdefault("rag_upload_error", None)
+
+SAMPLE_NAME = "sample_document.pdf"
+
+SUGGESTIONS = [
+    "Summarize the main points of the document",
+    "What are the key conclusions?",
+    "Which topics does the document cover?",
+]
+
+# ---------------------------------------------------------------- sidebar
+with st.sidebar:
+    st.markdown("**Knowledge base**")
+    uploaded = st.file_uploader("Upload a PDF", type=["pdf"], help="Text-based PDF, up to 20 MB / 100 pages")
+
+    if uploaded is not None:
+        sig = f"{uploaded.name}:{uploaded.size}"
+        if st.session_state["rag_sig"] != sig:
+            st.session_state["rag_sig"] = sig
+            st.session_state["rag_upload_error"] = None
+            with st.spinner("Reading and indexing your PDF…"):
+                data, secs, err = api_upload("/api/rag/upload", uploaded.name, uploaded.getvalue())
+            if err:
+                st.session_state["rag_doc"] = None
+                st.session_state["rag_upload_error"] = err
+            else:
+                st.session_state["rag_doc"] = data
+                st.session_state["rag_history"] = []
+                st.toast(f"Indexed {uploaded.name}", icon="✅")
+    elif st.session_state["rag_sig"]:          # file removed with the ✕ button
+        st.session_state.update(rag_sig=None, rag_doc=None, rag_upload_error=None, rag_history=[])
+
+    doc = st.session_state["rag_doc"]
+    if st.session_state["rag_upload_error"]:
+        st.error(st.session_state["rag_upload_error"])
+    if doc:
+        st.success(f"📄 {doc['filename']}")
+        st.caption(f"{doc['pages']} pages · {doc['chunks']} chunks indexed")
+    else:
+        st.markdown(f"📄 `{SAMPLE_NAME}` (default)")
+        st.caption("Upload a PDF above to ask about your own document.")
+
+    st.divider()
+    st.markdown("**Sample questions**")
+    for s in SUGGESTIONS:
+        if st.button(s, key=f"sugg_{s}"):
+            st.session_state["queued"] = s
+    st.divider()
+    if st.button("🗑️ Clear history"):
+        st.session_state["rag_history"] = []
+        st.rerun()
+
+# ------------------------------------------------------------------- main
+hero("Document Q&A", "Upload a PDF and ask questions. Every answer is grounded in a source passage.", MODULES[MODULE]["icon"])
+active_name = doc["filename"] if doc else SAMPLE_NAME
+chips([f"📄 Active document: {active_name}"], "green" if doc else "")
 
 
-def extract_text_content(content) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("text") is not None:
-                parts.append(str(block["text"]))
-        return "".join(parts).strip()
-    if isinstance(content, dict):
-        return str(content.get("text", "")).strip()
-    return str(content).strip()
+def render(item: dict, expanded: bool = True) -> None:
+    st.markdown(f"##### ❓ {item['question']}")
+    st.markdown(item["answer"])
+    if item.get("source"):
+        with st.expander("📎 Source snippet", expanded=expanded):
+            quote(item["source"])
+    chips([f"📄 {item.get('doc', '')}", f"⏱ {item['latency']:.1f}s"], "green")
 
 
-st.set_page_config(page_title="Module 2 - Document RAG", layout="centered")
-st.title("Module 2: Document RAG")
+with st.form("rag_form", clear_on_submit=True, border=True):
+    question = st.text_area(
+        "Your question", placeholder="e.g. What does the document say about…?", height=90,
+        label_visibility="collapsed",
+    )
+    submitted = st.form_submit_button("Ask document", type="primary", use_container_width=True)
 
-uploaded_pdf = st.file_uploader("Upload a PDF", type=["pdf"])
-if uploaded_pdf is not None:
-    upload_key = f"{uploaded_pdf.name}_{uploaded_pdf.size}"
-    if st.session_state.get("last_uploaded_pdf") != upload_key:
-        with st.spinner("Uploading and indexing PDF..."):
-            try:
-                files = {
-                    "file": (
-                        uploaded_pdf.name,
-                        uploaded_pdf.getvalue(),
-                        "application/pdf",
-                    )
-                }
-                up_resp = requests.post(UPLOAD_API_URL, files=files, timeout=120)
-                if not up_resp.ok:
-                    st.error(f"Upload failed ({up_resp.status_code}): {up_resp.text}")
-                up_resp.raise_for_status()
-                st.session_state["last_uploaded_pdf"] = upload_key
-                st.success(f"Uploaded: {uploaded_pdf.name}")
-            except requests.RequestException as exc:
-                st.error(f"Upload request failed: {exc}")
+if not question.strip() and st.session_state.get("queued"):
+    question, submitted = st.session_state.pop("queued"), True
 
-if "rag_messages" not in st.session_state:
-    st.session_state.rag_messages = []
+if submitted and question.strip():
+    q = question.strip()
+    if doc:
+        path, payload = "/api/rag/ask", {REQUEST_FIELDS["rag"]: q, "doc_id": doc["doc_id"]}
+    else:
+        path, payload = MODULES[MODULE]["endpoint"], {REQUEST_FIELDS["rag"]: q}
 
-for msg in st.session_state.rag_messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    with st.spinner("Searching the document…"):
+        data, secs, err = api_post(path, payload)
 
-prompt = st.chat_input("Ask a question from your PDF...")
+    if err and doc and "404" in err:
+        # Backend restarted and lost the in-memory index: re-index automatically, then re-ask.
+        st.session_state.update(rag_sig=None, rag_doc=None, queued=q)
+        st.rerun()
+    elif err:
+        st.error(err)
+    else:
+        st.session_state["rag_history"].insert(0, {
+            "question": q,
+            "answer": pick(data, "answer", "response", "output", default="_No answer returned._"),
+            "source": pick(data, "source_snippet", "source", "snippet"),
+            "latency": secs,
+            "doc": active_name,
+        })
 
-if prompt:
-    st.session_state.rag_messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Searching PDF..."):
-            try:
-                resp = requests.post(RAG_API_URL, json={"question": prompt}, timeout=60)
-                if not resp.ok:
-                    st.error(f"Backend error ({resp.status_code}): {resp.text}")
-                resp.raise_for_status()
-
-                data = resp.json()
-                raw_reply = (
-                    data.get("answer")
-                    or data.get("response")
-                    or data.get("result")
-                    or data.get("ai_history_entry")
-                    or ""
-                )
-                clean_reply = extract_text_content(raw_reply)
-
-                st.markdown(clean_reply)
-                st.session_state.rag_messages.append(
-                    {"role": "assistant", "content": clean_reply}
-                )
-            except requests.RequestException as exc:
-                st.error(f"Request failed: {exc}")
+history = st.session_state["rag_history"]
+if not history:
+    empty_state("📄", "Ask a question above to get an answer with its supporting source.")
+else:
+    render(history[0])
+    if len(history) > 1:
+        st.divider()
+        st.markdown("**Previous questions**")
+        for item in history[1:]:
+            with st.expander(item["question"]):
+                render({**item, "question": "Answer"}, expanded=False)

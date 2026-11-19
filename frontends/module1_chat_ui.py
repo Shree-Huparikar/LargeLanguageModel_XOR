@@ -1,103 +1,82 @@
-import requests
+"""Module 1 - Chat assistant with structured output (answer / topic / example)."""
 import streamlit as st
 
-API_URL = "http://127.0.0.1:8000/api/chat"
+from common import (REQUEST_FIELDS, MODULES, api_post, chips, empty_state,
+                    hero, pick, setup_page, sidebar)
+
+MODULE = "chat"
+setup_page(MODULE)
+sidebar(MODULE)
+
+st.session_state.setdefault("chat_messages", [])
+
+SUGGESTIONS = [
+    "Explain what a vector database is",
+    "What is the difference between RAG and fine-tuning?",
+    "How do prompt templates work in LangChain?",
+]
+
+with st.sidebar:
+    st.markdown("**Try asking**")
+    for s in SUGGESTIONS:
+        if st.button(s, key=f"sugg_{s}"):
+            st.session_state["queued"] = s
+    st.divider()
+    n = len(st.session_state["chat_messages"])
+    st.caption(f"{n} message{'s' if n != 1 else ''} in this conversation")
+    if st.button("🗑️ Clear conversation"):
+        st.session_state["chat_messages"] = []
+        st.rerun()
+
+hero("Chat Assistant", "Ask anything. Answers come back structured with a topic and an example.", MODULES[MODULE]["icon"])
 
 
-def extract_text_content(content) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("text") is not None:
-                parts.append(str(block["text"]))
-        return "".join(parts).strip()
-    if isinstance(content, dict):
-        return str(content.get("text", "")).strip()
-    return str(content).strip()
-
-
-def format_chat_reply(data: dict) -> str:
-    topic = extract_text_content(data.get("topic"))
-    answer = extract_text_content(
-        data.get("answer")
-        or data.get("response")
-        or data.get("result")
-        or ""
-    )
-    example = extract_text_content(data.get("example"))
-
-    sections = []
-    if topic:
-        sections.append(f"**Topic:** {topic}")
-    if answer:
-        sections.append(f"**Answer:** {answer}")
-    if example:
-        sections.append(f"**Example:** {example}")
-
-    if sections:
-        return "\n\n".join(sections)
-
-    return extract_text_content(data.get("ai_history_entry"))
-
-
-st.set_page_config(page_title="Module 1 - Structured Chat", layout="centered")
-st.title("Module 1: Structured Chat")
-
-if "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = []
-
-for msg in st.session_state.chat_messages:
-    with st.chat_message(msg["role"]):
+def render(msg: dict) -> None:
+    if msg["role"] == "user":
         st.markdown(msg["content"])
+        return
+    st.markdown(msg["answer"])
+    chips([f"🏷 {msg['topic']}"] if msg.get("topic") else [])
+    if msg.get("example"):
+        with st.expander("💡 Example", expanded=True):
+            st.markdown(msg["example"])
+    if msg.get("latency"):
+        st.caption(f"Responded in {msg['latency']:.1f}s")
 
-prompt = st.chat_input("Ask a question...")
+
+if not st.session_state["chat_messages"]:
+    empty_state("💬", "Start a conversation using the box below or pick a suggestion from the sidebar.")
+
+for m in st.session_state["chat_messages"]:
+    with st.chat_message(m["role"], avatar="🧑‍💻" if m["role"] == "user" else "🤖"):
+        render(m)
+
+prompt = st.chat_input("Type your question…")
+if not prompt and st.session_state.get("queued"):
+    prompt = st.session_state.pop("queued")
 
 if prompt:
-    history_turns = [
-        {
-            "role": m["role"],
-            "content": extract_text_content(m.get("raw_content", m["content"])),
-        }
-        for m in st.session_state.chat_messages
-    ]
+    user_msg = {"role": "user", "content": prompt}
+    st.session_state["chat_messages"].append(user_msg)
+    with st.chat_message("user", avatar="🧑‍💻"):
+        render(user_msg)
 
-    st.session_state.chat_messages.append(
-        {"role": "user", "content": prompt, "raw_content": prompt}
-    )
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                payload = {"question": prompt, "history": history_turns}
-                resp = requests.post(API_URL, json=payload, timeout=60)
-                resp.raise_for_status()
-
-                data = resp.json()
-                display_reply = format_chat_reply(data)
-                history_entry = (
-                    extract_text_content(data.get("ai_history_entry"))
-                    or display_reply
-                )
-
-                st.markdown(display_reply)
-                st.session_state.chat_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": display_reply,
-                        "raw_content": history_entry,
-                    }
-                )
-            except requests.HTTPError as exc:
-                code = exc.response.status_code if exc.response is not None else "error"
-                detail = exc.response.text if exc.response is not None else str(exc)
-                st.error(f"Backend error ({code}): {detail}")
-            except requests.RequestException as exc:
-                st.error(f"Request failed: {exc}")
+    with st.chat_message("assistant", avatar="🤖"):
+        with st.spinner("Thinking…"):
+            data, secs, err = api_post(
+                MODULES[MODULE]["endpoint"],
+                {REQUEST_FIELDS["chat"]: prompt, "session_id": st.session_state["session_id"]},
+            )
+        if err:
+            st.error(err)
+            st.session_state["chat_messages"].pop()
+        else:
+            reply = {
+                "role": "assistant",
+                "answer": pick(data, "answer", "response", "output", default="_No answer returned._"),
+                "topic": pick(data, "topic"),
+                "example": pick(data, "example"),
+                "latency": secs,
+            }
+            st.session_state["chat_messages"].append(reply)
+            render(reply)

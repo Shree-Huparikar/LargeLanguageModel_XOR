@@ -1,65 +1,85 @@
-import requests
+"""Module 3 - AI agent with tool calling."""
 import streamlit as st
 
-API_URL = "http://127.0.0.1:8000/api/tools"
+from common import (REQUEST_FIELDS, MODULES, api_post, chips, empty_state,
+                    hero, pick, setup_page, sidebar)
+
+MODULE = "tools"
+setup_page(MODULE)
+sidebar(MODULE)
+
+st.session_state.setdefault("tool_messages", [])
+
+TOOLS = [
+    ("➕", "add_numbers", "Add two numbers", "What is 245 + 378?"),
+    ("✖️", "multiply_numbers", "Multiply two numbers", "Multiply 12 by 15"),
+    ("📅", "get_current_date", "Get today's date", "What is today's date?"),
+    ("🎓", "get_student_info", "Look up a student", "Get the student information"),
+]
+
+with st.sidebar:
+    st.markdown("**Available tools**")
+    for icon, name, desc, example in TOOLS:
+        if st.button(f"{icon} {desc}", key=f"tool_{name}", help=f"Runs `{name}`"):
+            st.session_state["queued"] = example
+    st.divider()
+    if st.button("🗑️ Clear conversation"):
+        st.session_state["tool_messages"] = []
+        st.rerun()
+
+hero("Tool-Calling Agent", "The agent decides which tool to use, runs it, and explains the result.", MODULES[MODULE]["icon"])
 
 
-def extract_text_content(content) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("text") is not None:
-                parts.append(str(block["text"]))
-        return "".join(parts).strip()
-    if isinstance(content, dict):
-        return str(content.get("text", "")).strip()
-    return str(content).strip()
-
-
-st.set_page_config(page_title="Module 3 - AI Agent Tools", layout="centered")
-st.title("Module 3: AI Agent Tools")
-
-if "tool_messages" not in st.session_state:
-    st.session_state.tool_messages = []
-
-for msg in st.session_state.tool_messages:
-    with st.chat_message(msg["role"]):
+def render(msg: dict) -> None:
+    if msg["role"] == "user":
         st.markdown(msg["content"])
+        return
+    st.markdown(msg["answer"])
+    if msg.get("tools"):
+        chips([f"🛠 {t}" for t in msg["tools"]], "amber")
+    if msg.get("latency"):
+        st.caption(f"Responded in {msg['latency']:.1f}s")
 
-prompt = st.chat_input("Ask the agent to use a tool (e.g., Multiply 3 and 5)...")
+
+def tool_names(data) -> list:
+    raw = pick(data, "tools_used", "tool_calls", "tools", default=[])
+    if isinstance(raw, str):
+        return [raw]
+    out = []
+    for t in raw or []:
+        out.append(t.get("name", str(t)) if isinstance(t, dict) else str(t))
+    return out
+
+
+if not st.session_state["tool_messages"]:
+    empty_state("🛠️", "Ask a question that needs a tool, or pick one from the sidebar.")
+
+for m in st.session_state["tool_messages"]:
+    with st.chat_message(m["role"], avatar="🧑‍💻" if m["role"] == "user" else "🤖"):
+        render(m)
+
+prompt = st.chat_input("Ask the agent to calculate, check the date, or look up a student…")
+if not prompt and st.session_state.get("queued"):
+    prompt = st.session_state.pop("queued")
 
 if prompt:
-    st.session_state.tool_messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    user_msg = {"role": "user", "content": prompt}
+    st.session_state["tool_messages"].append(user_msg)
+    with st.chat_message("user", avatar="🧑‍💻"):
+        render(user_msg)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Running agent..."):
-            try:
-                resp = requests.post(API_URL, json={"prompt": prompt}, timeout=60)
-                if not resp.ok:
-                    st.error(f"Backend error ({resp.status_code}): {resp.text}")
-                resp.raise_for_status()
-
-                data = resp.json()
-                raw_reply = (
-                    data.get("answer")
-                    or data.get("response")
-                    or data.get("result")
-                    or data.get("ai_history_entry")
-                    or ""
-                )
-                clean_reply = extract_text_content(raw_reply)
-
-                st.markdown(clean_reply)
-                st.session_state.tool_messages.append(
-                    {"role": "assistant", "content": clean_reply}
-                )
-            except requests.RequestException as exc:
-                st.error(f"Request failed: {exc}")
+    with st.chat_message("assistant", avatar="🤖"):
+        with st.spinner("Running agent…"):
+            data, secs, err = api_post(MODULES[MODULE]["endpoint"], {REQUEST_FIELDS["tools"]: prompt})
+        if err:
+            st.error(err)
+            st.session_state["tool_messages"].pop()
+        else:
+            reply = {
+                "role": "assistant",
+                "answer": pick(data, "answer", "response", "output", "result", default="_No answer returned._"),
+                "tools": tool_names(data),
+                "latency": secs,
+            }
+            st.session_state["tool_messages"].append(reply)
+            render(reply)
