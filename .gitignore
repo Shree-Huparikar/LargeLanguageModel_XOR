@@ -1,0 +1,8 @@
+# Which files and folders should not be tracked or uploaded to GitHub.
+
+.venv/
+.env
+__pycache__/
+*.pyc
+.vscode/
+chroma_db/

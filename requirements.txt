@@ -1,0 +1,14 @@
+langchain
+langchain-core
+langchain-community
+langchain-chroma
+langchain-text-splitters
+langchain-google-genai
+langchain-openai
+python-dotenv
+pydantic
+pypdf
+fastapi
+uvicorn
+streamlit
+requests
