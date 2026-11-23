@@ -19,8 +19,8 @@ warnings.filterwarnings("ignore", category=UserWarning)
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
-
-def extract_text_content(content: Any) -> str:
+# Converts different types of formats into one simple format.
+def extract_text_content(content: Any) -> str:  
     if content is None:
         return ""
     if isinstance(content, str):
@@ -37,7 +37,7 @@ def extract_text_content(content: Any) -> str:
         return str(content.get("text", "")).strip()
     return str(content).strip()
 
-
+# Backend receives the pdf in the form of bytes.
 def save_uploaded_pdf(file_bytes: bytes, filename: str = "uploaded.pdf") -> Path:
     upload_dir = Path(tempfile.gettempdir()) / "llm_rag_uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -117,8 +117,8 @@ def _add_chunks_with_retry(
 
 def build_rag_engine(
     pdf_path: Path | str | None = None,
-    batch_size: int = 25,
-    inter_batch_sleep: float = 0.5,
+    batch_size: int = 25,  # NUmber of chunks processed in one batch
+    inter_batch_sleep: float = 0.5,  # waiting time between batches
 ):
     llm = create_rag_llm()
 
@@ -127,8 +127,8 @@ def build_rag_engine(
     documents = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=100,
+        chunk_size=500,
+        chunk_overlap=50,
     )
     chunks = splitter.split_documents(documents)
     if not chunks:
@@ -149,11 +149,11 @@ def build_rag_engine(
 
     return retriever, prompt, structured_llm
 
-
+# The answer for the question
 def ask_rag(rag_engine, question: str) -> dict[str, str]:
     retriever, prompt, structured_llm = rag_engine
 
-    retrieved_docs = retriever.invoke(question)
+    retrieved_docs = retriever.invoke(question) # searches chroma for relevant chunks
     context = "\n\n".join(extract_text_content(doc.page_content) for doc in retrieved_docs)
 
     messages = prompt.invoke({

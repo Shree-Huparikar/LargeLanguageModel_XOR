@@ -38,3 +38,41 @@ class ToolResponse(BaseModel):
     result: str = ""
     tools_used: list[str] = Field(default_factory=list)
     ai_history_entry: str = ""
+
+
+# --- Module 4: LangGraph Workflow & HITL ---
+class WorkflowRequest(BaseModel):
+    question: str
+    thread_id: str = "default-thread"
+
+
+class WorkflowResumeRequest(BaseModel):
+    thread_id: str
+    approved: bool
+    reviewer_note: str = ""
+
+
+class WorkflowResponse(BaseModel):
+    thread_id: str
+    category: str = ""
+    response: str = ""
+    draft_response: str = ""
+    requires_approval: bool = False
+    approved: bool | None = None
+    steps_taken: list[str] = Field(default_factory=list)
+    turn_count: int = 0
+    next_nodes: list[str] = Field(default_factory=list)
+
+# --- Module 5: Multi-Agent Systems ---
+class MultiAgentRequest(BaseModel):
+    request: str
+
+
+class MultiAgentResponse(BaseModel):
+    result: str = ""
+    travel: str = ""
+    budget: str = ""
+    booking: str = ""
+    activities: str = ""
+    agents_used: list[str] = Field(default_factory=list)
+    handoff_log: list[str] = Field(default_factory=list)

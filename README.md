@@ -4,37 +4,45 @@ Three practical LangChain + Google Gemini projects (`gemini-3.5-flash-lite`, `ge
 
 ## Project Structure
 
-```
 LLM/
 ├── .env
 ├── .gitignore
-├── .streamlit/
+├── .streamlit/ 
 │   └── config.toml
 ├── requirements.txt
 ├── README.md
-├── Module1/            # Chatbot with structured output
+├── Module1/                # Chatbot with structured output
 │   ├── __init__.py
 │   ├── main.py
 │   └── service.py
-├── Module2/            # PDF Q&A using RAG
+├── Module2/                # PDF Q&A using RAG
 │   ├── __init__.py
 │   ├── main.py
 │   ├── service.py
 │   └── sample_document.pdf
-├── Module3/            # Agent with tool calling
+├── Module3/                # Agent with tool calling
 │   ├── __init__.py
 │   ├── main.py
 │   └── service.py
-├── backend/            # Shared FastAPI backend
+├── Module4/                # Stateful workflow & HITL using LangGraph
 │   ├── __init__.py
-│   ├── main.py
-│   └── schemas.py
-└── frontends/          # Streamlit UIs
-    ├── common.py       # shared theme, sidebar, API client
+│   ├── main.py             # Standalone CLI runner
+│   └── service.py          # StateGraph, routing, MemorySaver & HITL
+├── Module5/                # Multi-Agent Travel Planner (Supervisor + Specialists)
+│   ├── __init__.py
+│   ├── main.py             # Standalone CLI runner
+│   └── service.py
+├── backend/                # Shared FastAPI backend
+│   ├── __init__.py
+│   ├── main.py             # /api/chat, /api/rag, /api/tools, /api/workflow*
+│   └── schemas.py          # Pydantic request/response models
+└── frontends/              # Streamlit UIs
+    ├── common.py           # Shared theme, sidebar, API client
     ├── module1_chat_ui.py
     ├── module2_rag_ui.py
-    └── module3_tools_ui.py
-```
+    ├── module3_tools_ui.py
+    ├── module4_langgraph.py
+    └── module5_multi_agent.py
 
 ## Modules
 
@@ -95,3 +103,5 @@ uvicorn backend.main:app --reload --port 8000
 streamlit run frontends/module1_chat_ui.py --server.port 8501
 streamlit run frontends/module2_rag_ui.py --server.port 8502
 streamlit run frontends/module3_tools_ui.py --server.port 8503
+streamlit run frontends/module4_langgraph.py --server.port 8504
+streamlit run frontends/module5_multi_agent.py --server.port 8505

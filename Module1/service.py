@@ -96,6 +96,13 @@ def ask_chat(
     structured_llm=None,
     prompt: ChatPromptTemplate | None = None,
 ) -> dict[str, str]:
+    """Answer a turn using `history_turns`.
+
+    Note: `ask_chat` does not mutate `history_turns` in place. The caller must
+    append `{"role": "user", "content": clean_question}` and
+    `{"role": "assistant", "content": result["ai_history_entry"]}` to the
+    persisted history list and pass it back on subsequent turns.
+    """
     target_structured_llm = structured_llm or create_structured_llm()
     target_prompt = prompt or create_chat_prompt()
     clean_question = extract_text_content(question)
@@ -127,3 +134,30 @@ def ask_chat(
         "example": clean_example,
         "ai_history_entry": readable_ai_turn,
     }
+
+
+class ChatSession:
+    """Stateful wrapper that keeps `history_turns` updated across turns."""
+
+    def __init__(
+        self,
+        structured_llm=None,
+        prompt: ChatPromptTemplate | None = None,
+        history_turns: list[dict[str, str]] | None = None,
+    ):
+        self.structured_llm = structured_llm or create_structured_llm()
+        self.prompt = prompt or create_chat_prompt()
+        self.history_turns: list[dict[str, str]] = list(history_turns or [])
+
+    def ask(self, question: str) -> dict[str, str]:
+        clean_q = extract_text_content(question)
+        result = ask_chat(
+            question=clean_q,
+            history_turns=self.history_turns,
+            structured_llm=self.structured_llm,
+            prompt=self.prompt,
+        )
+        if clean_q:
+            self.history_turns.append({"role": "user", "content": clean_q})
+            self.history_turns.append({"role": "assistant", "content": result["ai_history_entry"]})
+        return result

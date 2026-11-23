@@ -24,12 +24,16 @@ REQUEST_FIELDS = {
     "chat": "question",
     "rag": "question",
     "tools": "message",
+    "workflow": "question",
+    "multi_agent": "request",
 }
 
 MODULES = {
     "chat": {"label": "Chat Assistant", "icon": "💬", "port": 8501, "endpoint": "/api/chat"},
     "rag": {"label": "Document Q&A (RAG)", "icon": "📄", "port": 8502, "endpoint": "/api/rag"},
     "tools": {"label": "Tool-Calling Agent", "icon": "🛠️", "port": 8503, "endpoint": "/api/tools"},
+    "workflow": {"label": "LangGraph Workflow", "icon": "🔀", "port": 8504, "endpoint": "/api/workflow"},
+    "multi_agent": {"label": "Multi-Agent Planner", "icon": "🤝", "port": 8505, "endpoint": "/api/multi-agent"},
 }
 
 CSS = """
