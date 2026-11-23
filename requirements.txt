@@ -5,6 +5,7 @@ langchain-chroma
 langchain-text-splitters
 langchain-google-genai
 langchain-openai
+langgraph-checkpoint-sqlite
 python-dotenv
 pydantic
 pypdf

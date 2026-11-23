@@ -7,15 +7,12 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from langgraph.checkpoint.sqlite import SqliteSaver
 from Module1.service import ask_chat, create_chat_prompt, create_structured_llm
 from Module2.service import ask_rag, build_rag_engine, save_uploaded_pdf
 from Module3.service import ask_agent, build_module3_agent
-from Module4.service import (
-    build_module4_graph,
-    get_workflow_state,
-    resume_workflow,
-    run_workflow,
-)
+from Module4.history_db import DEFAULT_SQLITE_DB_PATH, get_thread_messages, list_threads
+from Module4.service import build_module4_graph, get_workflow_state, resume_workflow, run_workflow
 from Module5.service import build_module5_graph, run_multi_agent
 from backend.schemas import (
     ChatRequest,
@@ -26,9 +23,11 @@ from backend.schemas import (
     RAGResponse,
     ToolRequest,
     ToolResponse,
+    WorkflowHistoryResponse,
     WorkflowRequest,
     WorkflowResponse,
     WorkflowResumeRequest,
+    WorkflowThreadListResponse,
 )
 
 
@@ -37,15 +36,27 @@ def _is_quota_error(exc: Exception) -> bool:
     return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
+def _get_m4_graph(app: FastAPI):
+    if getattr(app.state, "module4_graph", None) is None:
+        app.state.module4_graph = build_module4_graph(db_path=DEFAULT_SQLITE_DB_PATH)
+    return app.state.module4_graph
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.chat_structured_llm = create_structured_llm()
     app.state.chat_prompt = create_chat_prompt()
     app.state.rag_engine = None
     app.state.module3_agent = None
-    app.state.module4_graph = build_module4_graph()
-    app.state.module5_graph = build_module5_graph()
-    yield
+
+    DEFAULT_SQLITE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with SqliteSaver.from_conn_string(str(DEFAULT_SQLITE_DB_PATH)) as checkpointer:
+        app.state.module4_graph = build_module4_graph(
+            db_path=DEFAULT_SQLITE_DB_PATH,
+            checkpointer=checkpointer,
+        )
+        app.state.module5_graph = build_module5_graph()
+        yield
 
 
 app = FastAPI(title="LLM Modules Shared Backend", lifespan=lifespan)
@@ -96,10 +107,7 @@ def rag_endpoint(req: RAGRequest):
     try:
         rag_engine = getattr(app.state, "rag_engine", None)
         if rag_engine is None:
-            raise HTTPException(
-                status_code=400,
-                detail="No PDF indexed yet. Upload a PDF first.",
-            )
+            raise HTTPException(status_code=400, detail="No PDF indexed yet. Upload a PDF first.")
         result = ask_rag(rag_engine, req.question)
         return RAGResponse(**result)
     except HTTPException:
@@ -126,12 +134,11 @@ def tools_endpoint(req: ToolRequest):
 @app.post("/api/workflow", response_model=WorkflowResponse)
 def workflow_endpoint(req: WorkflowRequest):
     try:
-        if getattr(app.state, "module4_graph", None) is None:
-            app.state.module4_graph = build_module4_graph()
         result = run_workflow(
             question=req.question,
             thread_id=req.thread_id,
-            graph=app.state.module4_graph,
+            graph=_get_m4_graph(app),
+            db_path=DEFAULT_SQLITE_DB_PATH,
         )
         return WorkflowResponse(**result)
     except Exception as exc:
@@ -147,7 +154,8 @@ def workflow_resume_endpoint(req: WorkflowResumeRequest):
             thread_id=req.thread_id,
             approved=req.approved,
             reviewer_note=req.reviewer_note,
-            graph=app.state.module4_graph,
+            graph=_get_m4_graph(app),
+            db_path=DEFAULT_SQLITE_DB_PATH,
         )
         return WorkflowResponse(**result)
     except ValueError as exc:
@@ -161,11 +169,31 @@ def workflow_resume_endpoint(req: WorkflowResumeRequest):
 @app.get("/api/workflow/state/{thread_id}", response_model=WorkflowResponse)
 def workflow_state_endpoint(thread_id: str):
     try:
-        result = get_workflow_state(
-            thread_id=thread_id,
-            graph=app.state.module4_graph,
-        )
+        result = get_workflow_state(thread_id=thread_id, graph=_get_m4_graph(app))
         return WorkflowResponse(**result)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/workflow/threads", response_model=WorkflowThreadListResponse)
+def workflow_threads_endpoint():
+    try:
+        return WorkflowThreadListResponse(threads=list_threads(db_path=DEFAULT_SQLITE_DB_PATH))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/workflow/history/{thread_id}", response_model=WorkflowHistoryResponse)
+def workflow_history_endpoint(thread_id: str):
+    try:
+        graph = _get_m4_graph(app)
+        messages = get_thread_messages(thread_id=thread_id, db_path=DEFAULT_SQLITE_DB_PATH)
+        state = get_workflow_state(thread_id=thread_id, graph=graph)
+        return WorkflowHistoryResponse(
+            thread_id=thread_id,
+            messages=messages,
+            state=WorkflowResponse(**state),
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -175,10 +203,7 @@ def multi_agent_endpoint(req: MultiAgentRequest):
     try:
         if getattr(app.state, "module5_graph", None) is None:
             app.state.module5_graph = build_module5_graph()
-        result = run_multi_agent(
-            request=req.request,
-            graph=app.state.module5_graph,
-        )
+        result = run_multi_agent(request=req.request, graph=app.state.module5_graph)
         return MultiAgentResponse(**result)
     except Exception as exc:
         if _is_quota_error(exc):
