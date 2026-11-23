@@ -4,10 +4,10 @@ Three practical LangChain + Google Gemini projects (`gemini-3.5-flash-lite`, `ge
 
 ## Project Structure
 
-LLM/
+LargeLangugaeModel_XOR/
 ├── .env
 ├── .gitignore
-├── .streamlit/ 
+├── .streamlit/
 │   └── config.toml
 ├── requirements.txt
 ├── README.md
@@ -27,7 +27,8 @@ LLM/
 ├── Module4/                # Stateful workflow & HITL using LangGraph
 │   ├── __init__.py
 │   ├── main.py             # Standalone CLI runner
-│   └── service.py          # StateGraph, routing, MemorySaver & HITL
+│   ├── service.py          # StateGraph, routing, SqliteSaver & HITL
+│   └── history_db.py       # SQLite message & thread history store
 ├── Module5/                # Multi-Agent Travel Planner (Supervisor + Specialists)
 │   ├── __init__.py
 │   ├── main.py             # Standalone CLI runner

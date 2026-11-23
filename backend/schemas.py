@@ -63,6 +63,39 @@ class WorkflowResponse(BaseModel):
     turn_count: int = 0
     next_nodes: list[str] = Field(default_factory=list)
 
+
+class WorkflowMessageItem(BaseModel):
+    role: str
+    content: str
+    response: str = ""
+    category: str = ""
+    draft_response: str = ""
+    requires_approval: bool = False
+    steps_taken: list[str] = Field(default_factory=list)
+    turn_count: int = 0
+    created_at: str = ""
+
+
+class WorkflowHistoryResponse(BaseModel):
+    thread_id: str
+    messages: list[WorkflowMessageItem] = Field(default_factory=list)
+    state: WorkflowResponse
+
+
+class WorkflowThreadSummary(BaseModel):
+    thread_id: str
+    thread_num: int = 1
+    title: str = "Thread 1"
+    message_count: int = 0
+    last_activity: str = ""
+    last_question: str = ""
+    last_category: str = ""
+
+
+class WorkflowThreadListResponse(BaseModel):
+    threads: list[WorkflowThreadSummary] = Field(default_factory=list)
+
+
 # --- Module 5: Multi-Agent Systems ---
 class MultiAgentRequest(BaseModel):
     request: str
