@@ -1,4 +1,6 @@
 """Module 2 - PDF question answering with RAG. Upload your own PDF or use the sample."""
+from html import escape
+
 import streamlit as st
 
 from common import (REQUEST_FIELDS, MODULES, api_post, api_upload, chips,
@@ -89,7 +91,17 @@ def render(item: dict, expanded: bool = True) -> None:
     if item.get("source"):
         with st.expander("📎 Source snippet", expanded=expanded):
             quote(item["source"])
-    chips([f"📄 {item.get('doc', '')}", f"⏱ {item['latency']:.1f}s"], "green")
+    doc_label = escape(str(item.get("doc", "")))
+    citation_raw = str(item.get("citations") or "").strip()
+    latency_val = float(item.get("latency", 0.0))
+    if citation_raw:
+        meta_html = (
+            f'<div class="muted">📄 {doc_label} &nbsp;&bull;&nbsp; '
+            f'{escape(citation_raw)} &nbsp;⏱ {latency_val:.1f}s</div>'
+        )
+    else:
+        meta_html = f'<div class="muted">📄 {doc_label} &nbsp;⏱ {latency_val:.1f}s</div>'
+    st.markdown(meta_html, unsafe_allow_html=True)
 
 
 with st.form("rag_form", clear_on_submit=True, border=True):
@@ -126,6 +138,7 @@ if submitted and question.strip():
             "question": q,
             "answer": pick(data, "answer", "response", "output", default="_No answer returned._"),
             "source": pick(data, "source_snippet", "source", "snippet"),
+            "citations": pick(data, "citations", "citation", default=""),
             "latency": secs,
             "doc": active_name,
         })

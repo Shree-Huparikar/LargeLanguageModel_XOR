@@ -19,8 +19,9 @@ warnings.filterwarnings("ignore", category=UserWarning)
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
+
 # Converts different types of formats into one simple format.
-def extract_text_content(content: Any) -> str:  
+def extract_text_content(content: Any) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
@@ -36,6 +37,7 @@ def extract_text_content(content: Any) -> str:
     if isinstance(content, dict):
         return str(content.get("text", "")).strip()
     return str(content).strip()
+
 
 # Backend receives the pdf in the form of bytes.
 def save_uploaded_pdf(file_bytes: bytes, filename: str = "uploaded.pdf") -> Path:
@@ -81,6 +83,7 @@ def create_rag_prompt() -> ChatPromptTemplate:
             "system",
             "You are an expert document assistant. Answer thoroughly and in detail "
             "using only the provided context. Format your 'answer' strictly as a numbered list (1., 2., 3., etc.). "
+            "Do NOT include chapter numbers, section numbers, or page numbers as a point or in the first point of 'answer'. "
             "For 'source_snippet', provide the exact unedited text excerpt from the document context. "
             "If the answer is not present, say you cannot find it in the document.",
         ),
@@ -113,6 +116,56 @@ def _add_chunks_with_retry(
                 delay = min(delay * 1.5, 65.0)
             else:
                 raise
+
+
+def _extract_citations(retrieved_docs: list, *extra_texts: str) -> str:
+    chapters: list[str] = []
+    sections: list[str] = []
+    pages: list[str] = []
+
+    def _add_unique(target: list[str], val: str, limit: int = 3) -> None:
+        cleaned = " ".join(val.split()).strip(" ,.-")
+        if cleaned and cleaned not in target and len(target) < limit:
+            target.append(cleaned)
+
+    for doc in retrieved_docs:
+        meta = getattr(doc, "metadata", {}) or {}
+        raw_page = meta.get("page")
+        if raw_page is not None:
+            try:
+                _add_unique(pages, str(int(raw_page) + 1), limit=5)
+            except (ValueError, TypeError):
+                _add_unique(pages, str(raw_page), limit=5)
+
+    combined_texts = [
+        extract_text_content(getattr(doc, "page_content", "")) for doc in retrieved_docs
+    ] + [extract_text_content(t) for t in extra_texts if t]
+
+    for blob in combined_texts:
+        if not blob:
+            continue
+        for ch in re.findall(r"\bChapter\s+\d+\b", blob, flags=re.IGNORECASE):
+            _add_unique(chapters, ch.title(), limit=2)
+        for sec in re.findall(r"\bSection\s+\d+(?:\.\d+)?\b", blob, flags=re.IGNORECASE):
+            _add_unique(sections, sec.title(), limit=3)
+        for pg in re.findall(
+            r"\b(?:Page|Pages|p\.|pp\.)\s*(\d+(?:\s*(?:and|,|-|–)\s*\d+)?)",
+            blob,
+            flags=re.IGNORECASE,
+        ):
+            for p_part in re.split(r"\s*(?:and|,|-|–)\s*", pg):
+                if p_part.strip().isdigit():
+                    _add_unique(pages, p_part.strip(), limit=5)
+
+    parts: list[str] = []
+    if chapters:
+        parts.append(", ".join(chapters))
+    if sections:
+        parts.append(", ".join(sections))
+    if pages:
+        parts.append(f"p. {', '.join(pages)}")
+
+    return ", ".join(parts)
 
 
 def build_rag_engine(
@@ -149,11 +202,12 @@ def build_rag_engine(
 
     return retriever, prompt, structured_llm
 
+
 # The answer for the question
 def ask_rag(rag_engine, question: str) -> dict[str, str]:
     retriever, prompt, structured_llm = rag_engine
 
-    retrieved_docs = retriever.invoke(question) # searches chroma for relevant chunks
+    retrieved_docs = retriever.invoke(question)  # searches chroma for relevant chunks
     context = "\n\n".join(extract_text_content(doc.page_content) for doc in retrieved_docs)
 
     messages = prompt.invoke({
@@ -162,7 +216,12 @@ def ask_rag(rag_engine, question: str) -> dict[str, str]:
     })
     response: RAGAnswer = structured_llm.invoke(messages)
 
+    clean_answer = clean_and_format_points(response.answer)
+    clean_snippet = extract_text_content(response.source_snippet)
+    citations = _extract_citations(retrieved_docs, clean_snippet)
+
     return {
-        "answer": clean_and_format_points(response.answer),
-        "source_snippet": extract_text_content(response.source_snippet),
+        "answer": clean_answer,
+        "source_snippet": clean_snippet,
+        "citations": citations,
     }

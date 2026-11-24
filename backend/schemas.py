@@ -24,6 +24,8 @@ class RAGRequest(BaseModel):
 
 class RAGResponse(BaseModel):
     answer: str
+    source_snippet: str = ""
+    citations: str = ""
     sources: list[str] = Field(default_factory=list)
     ai_history_entry: str = ""
 
